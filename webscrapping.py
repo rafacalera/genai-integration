@@ -1,7 +1,6 @@
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
-import time
 import signal
 
 def timeout_handler(signum, frame):
@@ -10,7 +9,6 @@ def timeout_handler(signum, frame):
 signal.signal(signal.SIGALRM, timeout_handler)
 
 def get_all_links(base_url):
-    start_time = time.time()
     visited_urls = set()
     urls_to_visit = [base_url]
     
