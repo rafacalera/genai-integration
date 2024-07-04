@@ -1,64 +1,59 @@
 import streamlit as st
 import os
+import threading
 from openai import AzureOpenAI
 from dotenv import load_dotenv
 from urllib.parse import urljoin, urlparse
 import requests
 from bs4 import BeautifulSoup
-import time
 
-# def get_all_links(base_url, timeout=1):
-#     start_time = time.time()
-#     visited_urls = set()
-#     urls_to_visit = [base_url]
+def scrape_site(url, data_collected, stop_event):
+    visited_urls = set()
+    urls_to_visit = [url]
 
-#     try: 
-#         while urls_to_visit:
-#             if time.time() - start_time > timeout:
-#                 return list(visited_urls.union(urls_to_visit))
+    try:
+        while urls_to_visit:
+            if stop_event.is_set():
+                return
+    
+            url = urls_to_visit.pop(0)
+            print(url)
         
-#             url = urls_to_visit.pop(0)
+            if url in visited_urls:
+                continue
         
-#             if url in visited_urls:
-#                 continue
-        
-#             visited_urls.add(url)
+            visited_urls.add(url)
 
-#             response = requests.get(url)
-            
-#             if response.status_code == 200:
-#                 soup = BeautifulSoup(response.text, 'html.parser')
-                
-#                 for link in soup.find_all('a', href=True):
-#                     full_url = urljoin(base_url, link['href'])
+            response = requests.get(url, timeout=3)
+            if response.status_code == 200:
+                soup = BeautifulSoup(response.text, 'html.parser')
                     
-#                     if urlparse(full_url).netloc == urlparse(base_url).netloc and full_url not in visited_urls:
-#                         print(full_url)
-#                         urls_to_visit.append(full_url)
-#     except Exception:
-#         return list(visited_urls.union(urls_to_visit))
-    
-#     return visited_urls
+                title = soup.find('title').text if soup.find('title') else 'No title'
+                content = soup.get_text()
+                data_collected.append({"url": url, "title": title, "content": content})
+                    
+                for link in soup.find_all('a', href=True):
+                    full_url = urljoin(url, link['href'])
+                    if urlparse(full_url).netloc == urlparse(url).netloc and full_url not in visited_urls:
+                        urls_to_visit.append(full_url)
 
-# def scrape_site(base_url):
-#     all_links = get_all_links(base_url)
-#     content_of_links = ''
+    except Exception as e:
+        print(f"Error processing the site {url}: {e}")
     
-#     for link in all_links:
-#         try:
-#             response = requests.get(link)
-#             if response.status_code == 200:
-#                 soup = BeautifulSoup(response.text, 'html.parser')
             
-#                 title = soup.find('title').text if soup.find('title') else 'No title'
-#                 content = soup.get_text()
-                
-#                 content_of_links += f"Title: {title}\nContent: {content}\n\n"
-#                 print(content_of_links)
-#         except Exception as e:
-#             print(f"Error scraping {link}: {e}")
+def limited_time_scraping(url, timeout):
+    data_collected = []
+    stop_event = threading.Event()
+    scraping_thread = threading.Thread(target=scrape_site, args=(url, data_collected, stop_event))
+    scraping_thread.start()
+    scraping_thread.join(timeout=timeout)
 
-#     return content_of_links
+    if scraping_thread.is_alive():
+        stop_event.set()
+        scraping_thread.join()
+        return data_collected, False
+    else:
+        return data_collected, True
 
 
 # Interface
@@ -72,19 +67,16 @@ def is_valid_url(url):
         return False
     
 with st.sidebar:
-    link = st.text_input("Website que eu serei sábio 🧙‍♂️🔮")
+    link = st.text_input("Digite o link de um site 🧙‍♂️🔮")
 
 if is_valid_url(link):
-    response = requests.get(link)
-    if response.status_code == 200:
-        soup = BeautifulSoup(response.text, 'html.parser')
-            
-        title = soup.find('title').text if soup.find('title') else 'Sem tiltulo'
-        content = soup.get_text()
-                
-        content_of_links = f"Titulo: {title}\nConteúdo: {content}\n\n"
+    data, success = limited_time_scraping(link, 1)
 
+    if success:
+        st.info(f"Agora que eu já sei TUDO sobre o site {link}, faça me uma pergunta")
+    else:
         st.info(f"Agora que eu já sei sobre o site {link}, faça me uma pergunta")
+        
 
 
 if "messages" not in st.session_state:
@@ -106,7 +98,7 @@ if prompt := st.chat_input():
         st.session_state.messages.append({"role": "user", "content": prompt})
         st.chat_message("user").write(prompt)
 
-        messages = [{"role": "assistant", "content": f"Você é um Sábio (como um mago mesmo) sobre o conteúdo do site {link} que seu contéudo esta abaixo: {content_of_links} \n\nSabendo disso responda as perguntas a seguir, em um tom sábio e autêntico"}] + st.session_state.messages
+        messages = [{"role": "assistant", "content": f"Você é um Sábio (como um mago mesmo) sobre o conteúdo do site {link} que seu contéudo esta abaixo: {data[0:2]} \n\nSabendo disso responda as perguntas a seguir, em um tom sábio e autêntico"}] + st.session_state.messages
 
         response = client.chat.completions.create(model=os.getenv("AZURE_DEPLOYMENT_NAME"), messages=messages)
 
