@@ -4,6 +4,7 @@ import threading
 from openai import AzureOpenAI
 from dotenv import load_dotenv
 from urllib.parse import urljoin, urlparse
+import tldextract
 import requests
 from bs4 import BeautifulSoup
 
@@ -17,8 +18,7 @@ def scrape_site(url, data_collected, stop_event):
                 return
     
             url = urls_to_visit.pop(0)
-            print(url)
-        
+
             if url in visited_urls:
                 continue
         
@@ -30,11 +30,13 @@ def scrape_site(url, data_collected, stop_event):
                     
                 title = soup.find('title').text if soup.find('title') else 'No title'
                 content = soup.get_text()
-                data_collected.append({"url": url, "title": title, "content": content})
+                data_collected.append({"url": url, "title": title, "content": content.replace(" ", "")[:2000]})
                     
+                base_domain = tldextract.extract(url).registered_domain
                 for link in soup.find_all('a', href=True):
                     full_url = urljoin(url, link['href'])
-                    if urlparse(full_url).netloc == urlparse(url).netloc and full_url not in visited_urls:
+                    extracted_domain = tldextract.extract(full_url).registered_domain
+                    if extracted_domain == base_domain and full_url not in visited_urls:
                         urls_to_visit.append(full_url)
 
     except Exception as e:
@@ -57,7 +59,9 @@ def limited_time_scraping(url, timeout):
 
 
 # Interface
-st.title("Website Sage 🧙‍♂️")
+st.set_page_config(page_title="WebSage 🧙‍♂️", page_icon="🔮", layout="centered", initial_sidebar_state="auto", menu_items=None)
+
+st.title("WebSage 🧙‍♂️")
 
 def is_valid_url(url):
     try:
@@ -66,26 +70,32 @@ def is_valid_url(url):
     except ValueError:
         return False
     
-with st.sidebar:
-    link = st.text_input("Digite o link de um site 🧙‍♂️🔮")
+if "scraped_data" not in st.session_state:
+    st.session_state["scraped_data"] = None
 
-if is_valid_url(link):
-    data, success = limited_time_scraping(link, 1)
+if "success" not in st.session_state:
+    st.session_state["success"] = None
+    
+with st.form("link_form"):
+    link = st.text_input("Digite o link de um site 🔮")
+    submitted = st.form_submit_button("Enviar")
+    if submitted and is_valid_url(link):
+        st.session_state["scraped_data"], st.session_state["success"] = limited_time_scraping(link, 3)
 
-    if success:
-        st.info(f"Agora que eu já sei TUDO sobre o site {link}, faça me uma pergunta")
-    else:
-        st.info(f"Agora que eu já sei sobre o site {link}, faça me uma pergunta")
-        
-
+        if st.session_state["success"]:
+            st.info(f"Agora que eu já sei TUDO sobre o site {link}, faça me uma pergunta")
+        else:
+            st.info(f"Agora que eu já sei sobre o site {link}, faça me uma pergunta")
+    elif submitted and not is_valid_url(link):
+        st.info("Por favor, me de um link válido para que possamos conversar", icon="🧙‍♂️")
 
 if "messages" not in st.session_state:
     st.session_state["messages"] = [{"role": "assistant", "content": "Como eu posso te ajudar?"}]
 
 for msg in st.session_state.messages:
-    st.chat_message(msg["role"]).write(msg["content"])
+    st.chat_message(msg["role"], avatar="🔮" ).write(msg["content"])
 
-if prompt := st.chat_input():
+if prompt := st.chat_input("Faça uma pergunta"):
     if is_valid_url(link):
         load_dotenv()
 
@@ -96,15 +106,21 @@ if prompt := st.chat_input():
         )
 
         st.session_state.messages.append({"role": "user", "content": prompt})
-        st.chat_message("user").write(prompt)
+        st.chat_message("user", avatar="🤯").write(prompt)
 
-        messages = [{"role": "assistant", "content": f"Você é um Sábio (como um mago mesmo) sobre o conteúdo do site {link} que seu contéudo esta abaixo: {data[0:2]} \n\nSabendo disso responda as perguntas a seguir, em um tom sábio e autêntico"}] + st.session_state.messages
+        messages = [{"role": "assistant", "content": f"Você é um GRANDE compreensor (como um sábio) sobre o site {link} que seu contéudo esta fornecido abaixo: {st.session_state.scraped_data[0:7]} \n\nSabendo disso responda as perguntas a seguir (que serão em grande maioria voltadas ao conteudo fornecido), em um tom autêncico e filosofo engajando o usuário a fazer mais perguntas e se o conteúdo nao foi o suficiente para responder a pergunte, forneça um caminho provável para pesquisa para encontrar a resposta"}] + st.session_state.messages
 
-        response = client.chat.completions.create(model=os.getenv("AZURE_DEPLOYMENT_NAME"), messages=messages)
+        response = client.chat.completions.create(
+            model=os.getenv("AZURE_DEPLOYMENT_NAME"), 
+            messages=messages, 
+            n=1,
+            temperature=0.7,
+            max_tokens=250
+        )
 
         msg = response.choices[0].message.content
         st.session_state.messages.append({"role": "assistant", "content": msg})
-        st.chat_message("assistant").write(msg)
+        st.chat_message("assistant", avatar="🧙‍♂️").write(msg)
     elif not is_valid_url(link):
         st.toast("Por favor, antes de conversarmos me de um link para que seja o tópico da nossa conversa", icon="🧙‍♂️")
         st.stop()
