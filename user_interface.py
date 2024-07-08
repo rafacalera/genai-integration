@@ -1,12 +1,29 @@
 import streamlit as st
 import os
 import threading
-from openai import AzureOpenAI
+import google.generativeai as genai
 from dotenv import load_dotenv
 from urllib.parse import urljoin, urlparse
 import tldextract
 import requests
 from bs4 import BeautifulSoup
+
+load_dotenv()
+
+genai.configure(api_key=os.getenv("GEMINI_KEY"))
+
+model_config = genai.GenerationConfig(
+    temperature=0.7,
+    top_k=1000,
+    max_output_tokens=1000,
+    top_p=1
+)
+
+model = genai.GenerativeModel(
+    model_name="gemini-1.5-flash",
+    system_instruction="Seu nome é WebSage, você é um Guia de turista 'Web' treinado para responder perguntas sobre sites forncedidos.",
+    generation_config=model_config
+)
 
 def scrape_site(url, data_collected, stop_event):
     visited_urls = set()
@@ -80,7 +97,7 @@ with st.form("link_form"):
     link = st.text_input("Digite o link de um site 🔮")
     submitted = st.form_submit_button("Enviar")
     if submitted and is_valid_url(link):
-        st.session_state["scraped_data"], st.session_state["success"] = limited_time_scraping(link, 3)
+        st.session_state["scraped_data"], st.session_state["success"] = limited_time_scraping(link, 1)
 
         if st.session_state["success"]:
             st.info(f"Agora que eu já sei TUDO sobre o site {link}, faça me uma pergunta")
@@ -93,34 +110,26 @@ if "messages" not in st.session_state:
     st.session_state["messages"] = [{"role": "assistant", "content": "Como eu posso te ajudar?"}]
 
 for msg in st.session_state.messages:
-    st.chat_message(msg["role"], avatar="🔮" ).write(msg["content"])
+    if msg["role"] == "user":
+        st.chat_message(msg["role"], avatar="😎").write(msg["content"])
+    elif st.session_state.messages[0] == msg:
+        st.chat_message(msg["role"], avatar="🔮").write(msg["content"])
+    elif msg["role"] == "assistant":
+        st.chat_message(msg["role"], avatar="🧙‍♂️").write(msg["content"])
 
 if prompt := st.chat_input("Faça uma pergunta"):
     if is_valid_url(link):
-        load_dotenv()
-
-        client = AzureOpenAI(
-        api_key = os.getenv("AZURE_OPENAI_API_KEY"),  
-        api_version = os.getenv("AZURE_API_VERSION") ,
-        azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
-        )
-
         st.session_state.messages.append({"role": "user", "content": prompt})
-        st.chat_message("user", avatar="🤯").write(prompt)
+        st.chat_message("user", avatar="😎").write(prompt)
 
-        messages = [{"role": "assistant", "content": f"Você é um GRANDE compreensor (como um sábio) sobre o site {link} que seu contéudo esta fornecido abaixo: {st.session_state.scraped_data[0:7]} \n\nSabendo disso responda as perguntas a seguir (que serão em grande maioria voltadas ao conteudo fornecido), em um tom autêncico e filosofo engajando o usuário a fazer mais perguntas e se o conteúdo nao foi o suficiente para responder a pergunte, forneça um caminho provável para pesquisa para encontrar a resposta"}] + st.session_state.messages
+        history = [msg["content"] for msg in st.session_state.messages]
+        messages = [f"Aqui está o conteúdo relacionado ao site {link}\n{st.session_state.scraped_data}"] + history
 
-        response = client.chat.completions.create(
-            model=os.getenv("AZURE_DEPLOYMENT_NAME"), 
-            messages=messages, 
-            n=1,
-            temperature=0.7,
-            max_tokens=250
-        )
+        print(messages, "Prompt before generating content")
+        response = model.generate_content(messages)
 
-        msg = response.choices[0].message.content
-        st.session_state.messages.append({"role": "assistant", "content": msg})
-        st.chat_message("assistant", avatar="🧙‍♂️").write(msg)
+        st.session_state.messages.append({"role": "assistant", "content": response.text})
+        st.chat_message("assistant", avatar="🧙‍♂️").write(response.text)
     elif not is_valid_url(link):
         st.toast("Por favor, antes de conversarmos me de um link para que seja o tópico da nossa conversa", icon="🧙‍♂️")
         st.stop()
