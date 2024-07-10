@@ -21,7 +21,7 @@ model_config = genai.GenerationConfig(
 
 model = genai.GenerativeModel(
     model_name="gemini-1.5-flash",
-    system_instruction="Seu nome é WebSage, você é um Guia de turismo 'Web' treinado para responder perguntas sobre sites forncedidos, **sem inventar informações**, **utilizando o conteúdo fornecido, sem puxar informações a mais** e engajando o usuário a perguntar, **Você devera se recusar a responder perguntas que não sejam referente ao conteudo ou contexto dado do site**, pois voce não tem autoridade para responder perguntas sobre outros assuntos",
+    system_instruction="Seu nome é WebSage, você é um Guia de turismo 'Web' treinado para responder perguntas sobre sites forncedidos, sem utilizar informacoes da internet e **utilizando apenas o conteúdo fornecido**, **sem inventar informações**, **Você devera se recusar a responder perguntas que não sejam referente ao conteudo ou contexto dado do site**, pois voce não tem autoridade para responder perguntas sobre outros assuntos",
     generation_config=model_config
 )
 
@@ -55,7 +55,6 @@ def scrape_site(url, data_collected, stop_event):
                     extracted_domain = tldextract.extract(full_url).registered_domain
                     if extracted_domain == base_domain and full_url not in visited_urls:
                         urls_to_visit.append(full_url)
-
     except Exception as e:
         print(f"Error processing the site {url}: {e}")
     
@@ -97,12 +96,19 @@ with st.form("link_form"):
     link = st.text_input("Digite o link de um site 🔮")
     submitted = st.form_submit_button("Enviar")
     if submitted and is_valid_url(link):
-        st.session_state["scraped_data"], st.session_state["success"] = limited_time_scraping(link, 3)
+        scraped_data , st.session_state["success"] = limited_time_scraping(link, 3)
 
-        if st.session_state["success"]:
-            st.info(f"Agora que eu já sei TUDO sobre o site {link}, faça me uma pergunta")
+        if len(scraped_data) != 0: 
+
+            st.session_state["scraped_data"] = scraped_data
+
+            if st.session_state["success"]:
+                st.info(f"Agora que eu já sei TUDO sobre o site {link}, faça me uma pergunta")
+            else:
+                st.info(f"Agora que eu já sei sobre o site {link}, faça me uma pergunta")
         else:
-            st.info(f"Agora que eu já sei sobre o site {link}, faça me uma pergunta")
+            st.toast("Não foi possivel ler o conteúdo do site 😥, Tente novamente ou forneça-me outro link 😁", icon="🧙‍♂️")
+
     elif submitted and not is_valid_url(link):
         st.info("Por favor, me de um link válido para que possamos conversar", icon="🧙‍♂️")
 
@@ -121,6 +127,10 @@ if prompt := st.chat_input("Faça uma pergunta"):
     if not prompt.strip() or len(prompt) == 0:
         st.toast("Faça uma pergunta válida para que possamos conversar!", icon="🧙‍♂️")
 
+    elif st.session_state.scraped_data == None:
+        st.toast("Não consigo te responder pois não foi possivel ler o conteúdo do site, Tente outro link 😁", icon="🧙‍♂️")
+        st.stop()
+
     elif is_valid_url(link):
         st.session_state.messages.append({"role": "user", "content": prompt})
         st.chat_message("user", avatar="😎").write(prompt)
@@ -131,6 +141,7 @@ if prompt := st.chat_input("Faça uma pergunta"):
 
         st.session_state.messages.append({"role": "assistant", "content": response.text})
         st.chat_message("assistant", avatar="🧙‍♂️").write(response.text)
+
     elif not is_valid_url(link):
         st.toast("Por favor, antes de conversarmos me de um link para que seja o tópico da nossa conversa", icon="🧙‍♂️")
         st.stop()
