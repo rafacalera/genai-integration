@@ -21,7 +21,7 @@ model_config = genai.GenerationConfig(
 
 model = genai.GenerativeModel(
     model_name="gemini-1.5-flash",
-    system_instruction="Seu nome é WebSage, você é um Guia de turista 'Web' treinado para responder perguntas sobre sites forncedidos.",
+    system_instruction="Seu nome é WebSage, você é um Guia de turismo 'Web' treinado para responder perguntas sobre sites forncedidos, **sem inventar informações**, **utilizando o conteúdo fornecido, sem puxar informações a mais** e engajando o usuário a perguntar, **Você devera se recusar a responder perguntas que não sejam referente ao conteudo ou contexto dado do site**, pois voce não tem autoridade para responder perguntas sobre outros assuntos",
     generation_config=model_config
 )
 
@@ -47,7 +47,7 @@ def scrape_site(url, data_collected, stop_event):
                     
                 title = soup.find('title').text if soup.find('title') else 'No title'
                 content = soup.get_text()
-                data_collected.append({"url": url, "title": title, "content": content.replace(" ", "")[:2000]})
+                data_collected.append({"url": url, "title": title, "content": content.replace("\n", "").replace(" ", "")})
                     
                 base_domain = tldextract.extract(url).registered_domain
                 for link in soup.find_all('a', href=True):
@@ -97,7 +97,7 @@ with st.form("link_form"):
     link = st.text_input("Digite o link de um site 🔮")
     submitted = st.form_submit_button("Enviar")
     if submitted and is_valid_url(link):
-        st.session_state["scraped_data"], st.session_state["success"] = limited_time_scraping(link, 1)
+        st.session_state["scraped_data"], st.session_state["success"] = limited_time_scraping(link, 3)
 
         if st.session_state["success"]:
             st.info(f"Agora que eu já sei TUDO sobre o site {link}, faça me uma pergunta")
@@ -118,14 +118,15 @@ for msg in st.session_state.messages:
         st.chat_message(msg["role"], avatar="🧙‍♂️").write(msg["content"])
 
 if prompt := st.chat_input("Faça uma pergunta"):
-    if is_valid_url(link):
+    if not prompt.strip() or len(prompt) == 0:
+        st.toast("Faça uma pergunta válida para que possamos conversar!", icon="🧙‍♂️")
+
+    elif is_valid_url(link):
         st.session_state.messages.append({"role": "user", "content": prompt})
         st.chat_message("user", avatar="😎").write(prompt)
 
-        history = [msg["content"] for msg in st.session_state.messages]
-        messages = [f"Aqui está o conteúdo relacionado ao site {link}\n{st.session_state.scraped_data}"] + history
-
-        print(messages, "Prompt before generating content")
+        history = [msg["role"] + ":"  + msg["content"] + "\n" for msg in st.session_state.messages]
+        messages = [f"system: Aqui está o conteúdo relacionado ao site {link}\n{st.session_state.scraped_data}"] + history
         response = model.generate_content(messages)
 
         st.session_state.messages.append({"role": "assistant", "content": response.text})
