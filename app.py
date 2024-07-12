@@ -2,10 +2,9 @@ import streamlit as st
 import os
 from dotenv import load_dotenv
 import threading
-import numpy as np
 import google.generativeai as genai
-from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+from sentence_transformers import SentenceTransformer
 import requests
 import tldextract
 from urllib.parse import urljoin, urlparse
@@ -24,20 +23,24 @@ model_config = genai.GenerationConfig(
 
 model = genai.GenerativeModel(
     model_name="gemini-1.5-flash",
+    system_instruction="Seu nome é WebSage, você é um Guia de turismo 'Web' treinado para responder perguntas sobre conteúdos de sites forncedidos," + 
+                            "**utilizando apenas o conteúdo fornecido**, **sem inventar informações**. " +
+                            "**Você não deve, em hipotese alguma, responder perguntas que não sejam referente ao conteudo site**," +
+                            "pois voce não tem autoridade para responder perguntas sobre outros assuntos que não sejam do site",
     generation_config=model_config
 )
  
 def create_embeddings(content):
-    vectorizer = TfidfVectorizer()
-    embeddings = vectorizer.fit_transform(content)
-    return vectorizer, embeddings
- 
-def search_with_embeddings(prompt, vectorizer, embeddings, content):
-    query_vec = vectorizer.transform([prompt])
+    model = SentenceTransformer('all-MiniLM-L6-v2')
+    embeddings = model.encode(content)
+    return model, embeddings
+
+def search_with_embeddings(prompt, model, embeddings, content, top_k=2):
+    query_vec = model.encode([prompt])
     similarities = cosine_similarity(query_vec, embeddings).flatten()
-    best_match_index = np.argmax(similarities)
-    best_match_segment = content[best_match_index]
-    return best_match_index, best_match_segment
+    top_k_indices = similarities.argsort()[-top_k:][::-1]
+    top_k_segments = [(index, content[index], similarities[index]) for index in top_k_indices]
+    return top_k_segments
 
 def scrape_site(url, data_collected, stop_event):
     visited_urls = set()
@@ -58,10 +61,10 @@ def scrape_site(url, data_collected, stop_event):
             response = requests.get(url, timeout=3)
             if response.status_code == 200:
                 soup = BeautifulSoup(response.text, 'html.parser')
-                    
                 title = soup.find('title').text if soup.find('title') else 'No title'
                 content = soup.get_text()
-                data_collected.append({"url": url, "title": title, "content": content})
+
+                data_collected.append(f"{url} - {title}: {content}")
                     
                 base_domain = tldextract.extract(url).registered_domain
                 for link in soup.find_all('a', href=True):
@@ -104,8 +107,8 @@ def is_valid_url(url):
 if "scraped_data" not in st.session_state:
     st.session_state["scraped_data"] = None
 
-if "vectorizer" not in st.session_state:
-    st.session_state["vectorizer"] = None
+if "model" not in st.session_state:
+    st.session_state["model"] = None
     
 if "embeddings" not in st.session_state:
     st.session_state["embeddings"] = None
@@ -118,13 +121,12 @@ with st.form("link_form"):
     link = st.text_input("Digite o link de um site 🔮")
     submitted = st.form_submit_button("Enviar")
     if submitted and is_valid_url(link):
-        scraped_data , st.session_state["success"] = limited_time_scraping(link, 5)
+        scraped_data , st.session_state["success"] = limited_time_scraping(link, 3)
 
         if len(scraped_data) != 0: 
             st.session_state["scraped_data"] = scraped_data
 
-            content = [item["url"] + " - " + item["title"] + ": "  + item["content"] for item in st.session_state.scraped_data]
-            st.session_state["vectorizer"], st.session_state["embeddings"] = create_embeddings(content)
+            st.session_state["model"], st.session_state["embeddings"] = create_embeddings(st.session_state["scraped_data"])
 
             if st.session_state["success"]:
                 st.info(f"Agora que eu já sei TUDO sobre o site {link}, faça me uma pergunta")
@@ -158,7 +160,7 @@ if prompt := st.chat_input("Faça uma pergunta"):
         st.stop()
 
     elif is_valid_url(link):
-        history = []
+        messages_history = []
         for msg in st.session_state.messages:
             role = ""
 
@@ -167,7 +169,7 @@ if prompt := st.chat_input("Faça uma pergunta"):
             elif msg["role"] == "user":
                 role = "user"
 
-            history.append({
+            messages_history.append({
                 "role": role,
                 "parts": [
                     msg["content"]
@@ -177,29 +179,22 @@ if prompt := st.chat_input("Faça uma pergunta"):
         st.session_state.messages.append({"role": "user", "content": prompt})
         st.chat_message("user", avatar="😎").write(prompt)
 
-        best_match_index, best_match_segment = search_with_embeddings(prompt, st.session_state["vectorizer"], st.session_state["embeddings"], st.session_state["scraped_data"])
-        
+        top_k_segments = search_with_embeddings(prompt, st.session_state["model"], st.session_state["embeddings"], st.session_state["scraped_data"])
+        print(top_k_segments)
+
         try:
             chat_session = model.start_chat(
                 history=[
                     {
                         "role": "user",
                         "parts": [
-                            "Seu nome é WebSage, você é um Guia de turismo 'Web' treinado para responder perguntas sobre conteúdos de sites forncedidos," + 
-                            "**utilizando apenas o conteúdo fornecido**, **sem inventar informações**. " +
-                            "**Você não deve, em hipotese alguma, responder perguntas que não sejam referente ao conteudo site**," +
-                            "pois voce não tem autoridade para responder perguntas sobre outros assuntos que não sejam do site"
-                        ],
-                    },
-                    {
-                        "role": "user",
-                        "parts": [
-                            f"Use o seguinte conteúdo do site {link} para responder: {best_match_segment}"
+                            f"Use o seguinte conteúdo do site {link} para responder: {top_k_segments}"
                         ],
                     }
-                ] + history
+                ] + messages_history
             )
             
+            print(model.count_tokens(chat_session.history))
             response = chat_session.send_message(prompt)
 
             st.session_state.messages.append({"role": "assistant", "content": response.text})
