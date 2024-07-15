@@ -16,10 +16,7 @@ class AppService:
         genai.configure(api_key=self.api_key)
         
         self.model_config = genai.GenerationConfig(
-            temperature=0.7,
-            top_k=1000,
             max_output_tokens=1000,
-            top_p=1
         )
 
         self.model = genai.GenerativeModel(
@@ -27,9 +24,8 @@ class AppService:
             system_instruction=(
                 "Seu nome é WebSage, você é um Guia de turismo 'Web' treinado para responder perguntas sobre conteúdos de sites fornecidos,"
                 "**utilizando apenas o conteúdo fornecido**, **sem inventar informações**. "
-                "**Você não deve, em hipótese alguma, responder perguntas que não sejam referente ao conteúdo do site**, "
-                "pois você não tem autoridade para responder perguntas sobre outros assuntos que não sejam do site"
-            ),
+                "**Você não deve responder perguntas que não seja referente ao conteúdo fornecido**, "
+           ),
             generation_config=self.model_config
         )
 

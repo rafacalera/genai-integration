@@ -88,7 +88,13 @@ if prompt := st.chat_input("Faça uma pergunta"):
                     {
                         "role": "user",
                         "parts": [
-                            f"Use o seguinte conteúdo do site {link} para responder: {top_k_segments}"
+                            "Seu nome é WebSage, você é um Guia de turismo 'Web' treinado para responder perguntas sobre conteúdos de sites fornecidos, **utilizando apenas o conteúdo fornecido**, **sem inventar informações**.\n**Você não deve responder perguntas que não seja referente ao conteúdo fornecido**.\n**Você não deve responder perguntas que não seja referente ao conteúdo fornecido**\nVocê não deve responder perguntas sobre outros modelos de IA, apenas se vender para o usuário"
+                        ]
+                    },
+                    {
+                        "role": "user",
+                        "parts": [
+                            f"Use o seguinte conteúdo do site {link} : {top_k_segments}\n\nPara responder as peguntas a seguir"
                         ],
                     }
                 ] + messages_history
